@@ -14,15 +14,18 @@ class HunterVpnConnection : VpnConnection {
     companion object {
         private const val RETRY_TIMES = 10
         private const val MAX_PACKET_SIZE = Short.MAX_VALUE
-        private const val HEAD_BYTE = Byte.MIN_VALUE
+        private const val CONTROL_MESSAGE = Byte.MIN_VALUE
         private val IDLE_INTERVAL = TimeUnit.MICROSECONDS.toMillis(100)
         private val SEND_ALIVE_INTERVAL = TimeUnit.SECONDS.toMillis(15)
         private val RECEIVE_TIMEOUT = TimeUnit.SECONDS.toMillis(20)
     }
 
+    private var secret: ByteArray = ByteArray(16) { 0 }
+
     private var statusListener: VpnConnection.StatusListener? = null
 
-    override fun init(statusListener: VpnConnection.StatusListener?) {
+    override fun init(secret: ByteArray, statusListener: VpnConnection.StatusListener?) {
+        this.secret = secret
         this.statusListener = statusListener
     }
 
@@ -51,13 +54,7 @@ class HunterVpnConnection : VpnConnection {
             if (!onProtectSocket(channel.socket())) throw IllegalStateException("Cannot protect the tunnel")
 
             // connect server and configure the channel
-            channel.run {
-                // connect to the server
-                connect(serverSocketAddress)
-
-                // set the socket to non-blocking
-                configureBlocking(false)
-            }
+            channel.connect(serverSocketAddress).configureBlocking(false)
 
             // data packet buffer
             val packet = ByteBuffer.allocate(MAX_PACKET_SIZE.toInt())
@@ -78,7 +75,7 @@ class HunterVpnConnection : VpnConnection {
                     packet.clear()
                     val length = inStream.read(packet.array())
                     if (length > 0) {
-                        packet.limit(length)
+                        packet.flip()
                         write(packet)
 
                         isIdle = false
@@ -91,8 +88,8 @@ class HunterVpnConnection : VpnConnection {
                     packet.clear()
                     val length = read(packet)
                     if (length > 0) {
-                        if (packet[0] == HEAD_BYTE) {
-                            // ignore head byte
+                        if (packet[0] == CONTROL_MESSAGE) {
+                            // ignore CONTROL MESSAGE
                         } else {
                             outStream.write(packet.array(), 0, length)
                         }
@@ -108,10 +105,10 @@ class HunterVpnConnection : VpnConnection {
                     val currentTime = System.currentTimeMillis()
 
                     if (currentTime - lastSendTime >= SEND_ALIVE_INTERVAL) {
-                        // no data to send for a while, so send 3 time HEAD BYTE
-                        packet.put(HEAD_BYTE).limit(1)
+                        // no data to send for a while, so send 3 time CONTROL MESSAGE
+                        packet.put(CONTROL_MESSAGE).limit(1)
                         for (i in 0 until 3) {
-                            packet.position(0)
+                            packet.flip()
                             channel.write(packet)
                         }
                         packet.clear()
@@ -126,7 +123,15 @@ class HunterVpnConnection : VpnConnection {
     }.isSuccess
 
     private fun handShake(channel: DatagramChannel): ParcelFileDescriptor {
+        val packet = ByteBuffer.allocate(1024)
+        packet.put(CONTROL_MESSAGE).put(secret)
+        repeat(3){
+            packet.flip()
+            channel.write(packet)
+        }
+        packet.clear()
 
+        
     }
 
     private fun retry(times: Int, action: (index: Int) -> Boolean) {

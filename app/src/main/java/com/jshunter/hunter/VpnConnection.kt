@@ -3,7 +3,7 @@ package com.jshunter.hunter
 import java.net.DatagramSocket
 
 interface VpnConnection {
-    fun init(statusListener: StatusListener? = null)
+    fun init(secret: ByteArray, statusListener: StatusListener? = null)
     fun connect(
         serverHostname: String,
         serverHostPort: Int,
