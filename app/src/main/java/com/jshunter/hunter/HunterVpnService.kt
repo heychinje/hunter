@@ -8,7 +8,8 @@ import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.VpnService
-import android.os.ParcelFileDescriptor
+import android.util.Log
+import java.nio.charset.StandardCharsets
 import java.util.concurrent.atomic.AtomicReference
 import kotlin.concurrent.thread
 
@@ -16,7 +17,7 @@ class HunterVpnService : VpnService() {
 //    private data class Connection(val t: Thread, val pfd: ParcelFileDescriptor)
 
     companion object {
-        val TAG = HunterVpnService::class.java.simpleName
+        val TAG: String = HunterVpnService::class.java.simpleName
         const val ACTION_CONNECT = "com.jshunter.hunter.START"
         const val ACTION_DISCONNECT = "com.jshunter.hunter.STOP"
     }
@@ -24,36 +25,54 @@ class HunterVpnService : VpnService() {
     private val connectingThread = AtomicReference<Thread?>()
 //    private val connection = AtomicReference<Connection?>()
 
-    override fun onCreate() {
+    private val connectionStatusListener = object : VpnConnection.StatusListener {
+        override fun onInitialized() {
+            Log.e(TAG, "onInitialized")
+        }
 
+        override fun onError(connectionId: String?, t: Throwable) {
+            Log.e(TAG, "onError： ", t)
+        }
+
+        override fun onConnecting() {
+            Log.e(TAG, "onConnecting")
+        }
+
+        override fun onConnected(connectionId: String?) {
+            Log.e(TAG, "onConnected: connectionId=$connectionId")
+        }
+    }
+
+    override fun onCreate() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) =
         if (intent?.action == ACTION_DISCONNECT) {
-            disconnect()
+            disconnectServer()
             START_NOT_STICKY
         } else {
-            connect()
+            connectServer()
             START_STICKY
         }
 
     override fun onDestroy() {
-        disconnect()
+        disconnectServer()
     }
 
-    private fun connect() {
+    private fun connectServer() {
         // become a foreground service
         updateForegroundNotification(
-            Icon.createWithResource(this, R.drawable.ic_vpn),
-            getString(R.string.connecting),
-            null
+            Icon.createWithResource(this, R.drawable.ic_vpn), getString(R.string.connecting), null
         )
 
         // start connection
-        startConnection(HunterVpnConnection())
+        startConnection(
+            HunterVpnConnection().apply { setStatusListener(connectionStatusListener) },
+            VpnConnection.Params("serverName", "secret".toByteArray(StandardCharsets.UTF_8))
+        )
     }
 
-    private fun disconnect() {
+    private fun disconnectServer() {
 
     }
 
@@ -78,13 +97,19 @@ class HunterVpnService : VpnService() {
         )
     }
 
-    private fun startConnection(vpnConnection: VpnConnection) {
+    private fun startConnection(vpnConnection: VpnConnection, params: VpnConnection.Params) {
         thread(name = "Connection-Thread") {
             vpnConnection.run {
-                init()
-                connect {
-
-                }
+                init(params)
+                connect(
+                    serverHostName = "",
+                    serverHostPort = 5555,
+                    vpnServiceBuilder = Builder(),
+                    protectSocket = { datagramSocket -> protect(datagramSocket) },
+                    establishConnection = {
+                        establish() ?: throw IllegalStateException("Failed to establish connection")
+                    }
+                )
             }
         }.also {
             connectingThread.getAndSet(it)?.interrupt()
