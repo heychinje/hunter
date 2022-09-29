@@ -3,116 +3,81 @@ package com.jshunter.hunter
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
-import android.app.NotificationManager.IMPORTANCE_HIGH
 import android.app.PendingIntent
 import android.content.Intent
 import android.graphics.drawable.Icon
 import android.net.VpnService
-import android.util.Log
-import java.nio.charset.StandardCharsets
-import java.util.concurrent.atomic.AtomicReference
-import kotlin.concurrent.thread
+import com.jshunter.hunter.client.Client
+import com.jshunter.hunter.client.VpnClientImpl
+import com.jshunter.hunter.eventbus.Event
+import com.jshunter.hunter.eventbus.Subscriber
+import com.jshunter.hunter.eventbus.impl.EventBus
 
-class HunterVpnService : VpnService() {
-//    private data class Connection(val t: Thread, val pfd: ParcelFileDescriptor)
-
+class HunterVpnService : VpnService(), Subscriber {
     companion object {
-        val TAG: String = HunterVpnService::class.java.simpleName
-        const val ACTION_CONNECT = "com.jshunter.hunter.START"
-        const val ACTION_DISCONNECT = "com.jshunter.hunter.STOP"
+        private const val CHANNEL_ID = "com.jshunter.hunter"
+        private const val CHANNEL_NAME = "Hunter"
+        private const val NOTIFICATION_ID = 1;
     }
 
-    private val connectingThread = AtomicReference<Thread?>()
-//    private val connection = AtomicReference<Connection?>()
-
-    private val connectionStatusListener = object : VpnConnection.StatusListener {
-        override fun onInitialized() {
-            Log.e(TAG, "onInitialized")
-        }
-
-        override fun onError(connectionId: String?, t: Throwable) {
-            Log.e(TAG, "onError： ", t)
-        }
-
-        override fun onConnecting() {
-            Log.e(TAG, "onConnecting")
-        }
-
-        override fun onConnected(connectionId: String?) {
-            Log.e(TAG, "onConnected: connectionId=$connectionId")
-        }
-    }
+    private val client: Client by lazy { VpnClientImpl() }
 
     override fun onCreate() {
+        super.onCreate()
+        EventBus.register(this)
     }
 
-    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) =
-        if (intent?.action == ACTION_DISCONNECT) {
-            disconnectServer()
-            START_NOT_STICKY
-        } else {
-            connectServer()
-            START_STICKY
-        }
-
-    override fun onDestroy() {
-        disconnectServer()
-    }
-
-    private fun connectServer() {
-        // become a foreground service
-        updateForegroundNotification(
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        client.init()
+        updateNotification(
             Icon.createWithResource(this, R.drawable.ic_vpn), getString(R.string.connecting), null
         )
-
-        // start connection
-        startConnection(
-            HunterVpnConnection().apply { setStatusListener(connectionStatusListener) },
-            VpnConnection.Params("serverName", "secret".toByteArray(StandardCharsets.UTF_8))
-        )
+        return START_STICKY
     }
 
-    private fun disconnectServer() {
-
+    override fun onDestroy() {
+        super.onDestroy()
+        client.disconnect()
+        EventBus.unregister(this)
     }
 
-    private fun updateForegroundNotification(
+    override fun onEvent(event: Event) {
+        when (event.type) {
+            EventType.OnConnect -> client.connect()
+            EventType.OnDisconnect -> client.disconnect()
+            EventType.OnUpdateNotification -> updateNotification(event)
+            else -> {}
+        }
+    }
+
+
+    private fun updateNotification(
         icon: Icon,
         msg: String,
         pendingIntent: PendingIntent?,
+        channelId: String = CHANNEL_ID,
+        channelName: String = CHANNEL_NAME,
+        notificationId: Int = NOTIFICATION_ID,
     ) {
-        val channelId = "com.jshunter.hunter"
-        val channelName = "Hunter"
-        val notificationId = 1;
         getSystemService(NotificationManager::class.java).createNotificationChannel(
-            NotificationChannel(channelId, channelName, IMPORTANCE_HIGH)
+            NotificationChannel(channelId, channelName, NotificationManager.IMPORTANCE_HIGH)
         )
-        startForeground(
-            notificationId,
-            Notification.Builder(this@HunterVpnService, channelId).apply {
-                setSmallIcon(icon)
-                setContentText(msg)
-                setContentIntent(pendingIntent)
-            }.build()
-        )
+        Notification.Builder(this, channelId).apply {
+            setSmallIcon(icon)
+            setContentText(msg)
+            setContentIntent(pendingIntent)
+        }.build().let {
+            startForeground(notificationId, it)
+        }
     }
 
-    private fun startConnection(vpnConnection: VpnConnection, params: VpnConnection.Params) {
-        thread(name = "Connection-Thread") {
-            vpnConnection.run {
-                init(params)
-                connect(
-                    serverHostName = "",
-                    serverHostPort = 5555,
-                    vpnServiceBuilder = Builder(),
-                    protectSocket = { datagramSocket -> protect(datagramSocket) },
-                    establishConnection = {
-                        establish() ?: throw IllegalStateException("Failed to establish connection")
-                    }
-                )
-            }
-        }.also {
-            connectingThread.getAndSet(it)?.interrupt()
+    private fun updateNotification(event: Event) {
+        val (icon, msg, pendingIntent) = with(event) {
+            val icon = bundle?.getParcelable<Icon>(BundleKey.icon)
+            val msg = bundle?.getString(BundleKey.msg)
+            val pendingIntent = bundle?.getParcelable<PendingIntent>(BundleKey.pendingIntent)
+            Triple(icon, msg, pendingIntent)
         }
+        updateNotification(icon ?: return, msg ?: return, pendingIntent)
     }
 }
