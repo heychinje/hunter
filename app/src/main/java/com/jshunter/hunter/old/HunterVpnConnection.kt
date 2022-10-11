@@ -6,6 +6,7 @@ import android.net.VpnService
 import android.os.Build
 import android.os.ParcelFileDescriptor
 import android.util.Log
+import com.jshunter.hunter.ext.repeatUntilFailure
 import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.io.IOException

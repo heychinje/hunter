@@ -1,4 +1,4 @@
-package com.jshunter.hunter.old
+package com.jshunter.hunter.ext
 
 fun retry(times: Int, action: (index: Int) -> Boolean) {
     var result: Boolean
