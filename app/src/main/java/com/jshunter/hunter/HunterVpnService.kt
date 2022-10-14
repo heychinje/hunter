@@ -13,9 +13,13 @@ import com.jshunter.hunter.eventbus.Event
 import com.jshunter.hunter.eventbus.Subscriber
 import com.jshunter.hunter.eventbus.impl.EventBus
 import com.jshunter.hunter.ext.updateNotification
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
 
 @RequiresApi(Build.VERSION_CODES.S)
-class HunterVpnService : VpnService(), Subscriber {
+class HunterVpnService : VpnService(), Subscriber,
+    CoroutineScope by CoroutineScope(Dispatchers.IO) {
     companion object {
         private const val TAG = "HunterVpnService"
         private const val CHANNEL_ID = "com.jshunter.hunter"
@@ -25,7 +29,11 @@ class HunterVpnService : VpnService(), Subscriber {
 
     private val mainActivityIntent by lazy { Intent(this, MainActivity::class.java) }
 
-    private val pendingIntent by lazy { PendingIntent.getActivity(this, 0, mainActivityIntent, FLAG_IMMUTABLE) }
+    private val pendingIntent by lazy {
+        PendingIntent.getActivity(
+            this, 0, mainActivityIntent, FLAG_IMMUTABLE
+        )
+    }
 
     private val client: Client by lazy { VpnClientImpl() }
 
@@ -33,9 +41,14 @@ class HunterVpnService : VpnService(), Subscriber {
         super.onCreate()
         Log.e(TAG, "onCreate: ")
         updateNotification(
-            R.drawable.ic_vpn, R.string.connecting, CHANNEL_ID, CHANNEL_NAME, NOTIFICATION_ID,pendingIntent
+            R.drawable.ic_vpn,
+            R.string.connecting,
+            CHANNEL_ID,
+            CHANNEL_NAME,
+            NOTIFICATION_ID,
+            pendingIntent
         )
-        client.init(this)
+        client.init(this, VpnConfig("192.168.2.1", 24))
         EventBus.register(this)
     }
 
@@ -57,6 +70,10 @@ class HunterVpnService : VpnService(), Subscriber {
             EventType.OnUpdateNotification -> updateNotification(event)
             else -> {}
         }
+    }
+
+    override fun onRevoke() {
+        super.onRevoke()
     }
 
     private fun connectRemoteServer() {
